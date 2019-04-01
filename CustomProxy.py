@@ -9,6 +9,7 @@ class CustomProxy():
     def __init__(self, ip="127.0.0.1", backlog=20, config_file='config.json'):
         self.BUFFER_SIZE = 2 * 1024
         self.ip = ip
+        self.log_file = None
 
         self.set_config(config_file)
         self.log('Configuration setup done.')
@@ -39,7 +40,6 @@ class CustomProxy():
         self.restriction = self.config['restriction']
         self.accounting = self.config['accounting']
         self.HTTPInjection = self.config['HTTPInjection']
-
 
     def handle_client(self, client_socket, client_address):
         request = client_socket.recv(self.BUFFER_SIZE)
@@ -102,11 +102,22 @@ class CustomProxy():
         return output
 
     def log(self, message, date=True):
-        current_time = time.strftime("[%d/%m/%Y:%H:%M:%S]")
-        if date:
-            print('%s %s' % (current_time, message))
-        else:
-            print(message)
+        if self.logging['enable']:
+            if self.log_file is None:
+                file_name = self.logging['logFile']
+                self.log_file = open(file_name, 'a+')
+            else:
+                current_time = time.strftime('[%d/%m/%Y:%H:%M:%S]')
+                if date:
+                    self.log_file.write('%s %s\n' % (current_time, message))
+                else:
+                    self.log_file.write('%s\n' % message)
+
+    def __del__(self):
+        self.log("Proxy shutdown")
+        self.log(
+            "$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$",
+            False)
 
 
 myProxy = CustomProxy()
