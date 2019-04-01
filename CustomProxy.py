@@ -1,4 +1,5 @@
 import socket
+import time
 from threading import Thread
 
 
@@ -8,29 +9,31 @@ class CustomProxy():
         self.BUFFER_SIZE = 2 * 1024
         self.ip = ip
         self.port = 8080
+        self.log('Proxy launched')
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        log("Socket successfully created")
+        self.log("Socket successfully created")
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.socket.bind((self.ip, self.port))
-        log("Socket bounded to %s" % self.port)
+        self.log("Socket bounded to %s" % self.port)
         self.socket.listen(backlog)
-        log("Socket is listening")
+        self.log("Socket is listening")
 
         while True:
             client_socket, client_address = self.socket.accept()
-            log('Accepted a request from client %s!\n' % str(client_address))
+            self.log('Accepted a request from client %s\n' % str(client_address))
             thread = Thread(target=self.handle_client, args=(client_socket, client_address))
             thread.setDaemon(True)
             thread.start()
 
     def handle_client(self, client_socket, client_address):
         request = client_socket.recv(self.BUFFER_SIZE)
-        log("Request received from %s" % str(client_address))
+        self.log("Request received from %s[%s] with headers:" % client_address)
+        self.log("-----------------------------------\n%s\n-----------------------------------" % request, False)
         method, path, host_name, host_port = self.parse_request(request)
         request = self.update_request(request, method, path)
         response = self.send_request(request, host_name, host_port)
         client_socket.sendall(response)
-        log("Response sent to client %s" % str(client_address))
+        self.log("Response sent to %s[%s]" % client_address)
 
     def parse_request(self, request):
         splitted_request = request.split('\r\n')
@@ -45,11 +48,6 @@ class CustomProxy():
         splitted_host = host.split(":")
         host_name = splitted_host[0]
         host_port = splitted_host[1] if len(splitted_host) > 1 else 80
-
-        log(splitted_request)
-        log("path: %s" % path)
-        log("host_name: %s" % host_name)
-        log("host_port: %s" % host_port)
 
         return method, path, host_name, host_port
 
@@ -67,15 +65,13 @@ class CustomProxy():
 
     def send_request(self, request, host_name, host_port):
         _socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        log("Socket to server created")
-        log((host_name, host_port))
+        self.log("Socket to %s[%s] created and connected" % (host_name, host_port))
         _socket.connect((host_name, host_port))
-        log("Socket connected to server")
-        log(request)
         _socket.sendall(request)
-        log("request sent to server")
+        self.log("Request sent to %s[%s] with headers:" % (host_name, host_port))
+        self.log("-----------------------------------\n%s\n-----------------------------------" % request, False)
         response = self.recv_all(_socket)
-        log("response received")
+        self.log("Response received from %s[%s]" % (host_name, host_port))
         _socket.close()
         return response
 
@@ -89,9 +85,12 @@ class CustomProxy():
                 break
         return output
 
-
-def log(message):
-    print(message)
+    def log(self, message, date=True):
+        current_time = time.strftime("[%d/%m/%Y:%H:%M:%S]")
+        if date:
+            print('%s %s' % (current_time, message))
+        else:
+            print(message)
 
 
 CustomProxy()
