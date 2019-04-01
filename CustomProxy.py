@@ -1,14 +1,18 @@
 import socket
 import time
 from threading import Thread
+import json
 
 
 class CustomProxy():
 
-    def __init__(self, ip="127.0.0.1", backlog=20):
+    def __init__(self, ip="127.0.0.1", backlog=20, config_file='config.json'):
         self.BUFFER_SIZE = 2 * 1024
         self.ip = ip
-        self.port = 8080
+
+        self.set_config(config_file)
+        self.log('Configuration setup done.')
+
         self.log('Proxy launched')
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.log("Socket successfully created")
@@ -24,6 +28,18 @@ class CustomProxy():
             thread = Thread(target=self.handle_client, args=(client_socket, client_address))
             thread.setDaemon(True)
             thread.start()
+
+    def set_config(self, config_file):
+        config_data = open(config_file).read()
+        self.config = json.loads(config_data)
+        self.port = self.config['port']
+        self.logging = self.config['logging']
+        self.caching = self.config['caching']
+        self.privacy = self.config['privacy']
+        self.restriction = self.config['restriction']
+        self.accounting = self.config['accounting']
+        self.HTTPInjection = self.config['HTTPInjection']
+
 
     def handle_client(self, client_socket, client_address):
         request = client_socket.recv(self.BUFFER_SIZE)
@@ -93,4 +109,4 @@ class CustomProxy():
             print(message)
 
 
-CustomProxy()
+myProxy = CustomProxy()
