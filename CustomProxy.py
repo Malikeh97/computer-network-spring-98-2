@@ -71,10 +71,12 @@ class CustomProxy():
         splitted_request = request.split('\r\n')
 
         splitted_request[0] = method + " " + path + " HTTP/1.0"
-        new_request = ""
+        new_request = ''
         for line in splitted_request:
             if line.find('Proxy-Connection') != -1:
                 continue
+            if self.privacy['enable'] and line.find('User-Agent') != -1:
+                line = 'User-Agent: %s' % self.privacy['userAgent']
             new_request += line + "\r\n"
 
         return new_request
