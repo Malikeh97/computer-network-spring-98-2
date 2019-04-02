@@ -3,6 +3,27 @@ import time
 from threading import Thread
 import json
 
+UNAVAILABLE = 0
+EXPIRED = 1
+FRESH = 2
+
+
+class Cache():
+    def __init__(self, cache_enable, cache_size):
+        self.cache_enable = cache_enable
+        self.cache_size = cache_size
+        self.cache_dict = {}
+    # def is_expired(self, path, host_name, host_port):
+
+    # def data_status(self, path, host_name, host_port):
+    #     if not self.cache_dict.has_key(host_name+path+":"+str(host_port)):
+    #         return UNAVAILABLE
+    #     else:
+    #         if
+
+
+
+
 
 class CustomProxy():
 
@@ -12,6 +33,9 @@ class CustomProxy():
 
         self.set_config(config_file)
         self.log('Configuration setup done.')
+
+        self.cache = Cache(self.caching['enable'], self.caching['size'])
+        self.log("Cache is set up")
 
         self.log('Proxy launched')
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -40,14 +64,14 @@ class CustomProxy():
         self.accounting = self.config['accounting']
         self.HTTPInjection = self.config['HTTPInjection']
 
-
     def handle_client(self, client_socket, client_address):
         request = client_socket.recv(self.BUFFER_SIZE)
         self.log("Request received from %s[%s] with headers:" % client_address)
         self.log("-----------------------------------\n%s\n-----------------------------------" % request, False)
         method, path, host_name, host_port = self.parse_request(request)
         request = self.update_request(request, method, path)
-        response = self.send_request(request, host_name, host_port)
+        client_packet = self.handle_caching(request, path, host_name, host_port)
+        response = self.send_request(request, host_name, host_port) #tobe combined
         client_socket.sendall(response)
         self.log("Response sent to %s[%s]" % client_address)
 
@@ -107,6 +131,73 @@ class CustomProxy():
             print('%s %s' % (current_time, message))
         else:
             print(message)
+
+    def check_request_header(self, data):
+
+        data_is_stale = True
+        if_modified_since = False
+        no_cache = False
+        no_store = False
+        # check_modified = False
+
+        request_header = data.split('\n')
+        for element in request_header:
+
+            if element == '':  # check in headers
+                break
+
+            if 'If-Modified-Since' in element:
+                if_modified_since = True
+                # check_modified = True
+
+            if 'Cache-Control' in element:
+                tmp = element.split(':')[1]
+                params = tmp.split(',')
+                for param in params:
+                    if 'no-cache' in param:
+                        no_cache = True
+
+                    if 'no-store' in param:
+                        no_store = True
+
+        return if_modified_since, no_cache, no_store
+
+    def handle_caching(self, request, path, host_name, host_port):
+
+        cache_response = ''
+
+        if self.caching['enable'] == True:
+
+            if_modified_since, no_cache, no_store = self.check_request_header(request)
+
+
+
+            # data_status = redis_obj.ttl(self.url)
+            #
+            # if data_status == -2:  # the source not available in cache
+            #     check_modified = False
+            #     data_is_stale = True
+            #
+            # elif data_status == -1:  # the source is expired
+            #     check_modified = True
+            #     data_is_stale = True
+            #
+            # elif data_status >= 0:  # the source is fresh
+            #     data_is_stale = False
+            #
+            # # get data from server or use cache
+            # if data_is_stale == False:
+            #     log('get from redis\n')
+            #     print 'get from redis '
+            #     cache_response = redis_obj.get(self.url)
+            #
+            # if data_is_stale == True:
+            #     cache_response = self.handle_server_response(check_modified, has_if_modified_since, request, webserver,
+            #                                                  port)
+
+        # else:
+        #     cache_response = self.send_to_server(request, webserver, port)
+        return cache_response
 
 
 myProxy = CustomProxy()
