@@ -10,6 +10,10 @@ class CustomProxy():
         self.BUFFER_SIZE = 2 * 1024
         self.ip = ip
         self.log_file = None
+        self.mail_server = ('mail.ut.ac.ir', 25)
+        self.auth_base64 = 'AG1hbGlrZWguZWhnaGFnaGkAU2FiaWxvd3NlOTc='
+        self.from_email = 'malikeh.ehghaghi@ut.ac.ir'
+        self.to_email = 'a.tabatabaei97@icloud.com'
 
         self.set_config(config_file)
         self.log('Configuration setup done.')
@@ -46,6 +50,9 @@ class CustomProxy():
         self.log("Request received from %s[%s] with headers:" % client_address)
         self.log("-----------------------------------\n%s\n-----------------------------------" % request, False)
         method, path, host_name, host_port = self.parse_request(request)
+        if self.is_restricted(host_name):
+            client_socket.close()
+            return
         request = self.update_request(request, method, path)
         response = self.send_request(request, host_name, host_port)
         client_socket.sendall(response)
@@ -70,7 +77,7 @@ class CustomProxy():
     def update_request(self, request, method, path):
         splitted_request = request.split('\r\n')
 
-        splitted_request[0] = method + " " + path + " HTTP/1.0"
+        splitted_request[0] = '%s %s HTTP/1.0' % (method, path)
         new_request = ''
         for line in splitted_request:
             if line.find('Proxy-Connection') != -1:
@@ -102,6 +109,59 @@ class CustomProxy():
             else:
                 break
         return output
+
+    def is_restricted(self, host_name):
+        if self.restriction['enable']:
+            targets = self.restriction['targets']
+            for target in targets:
+                if host_name == target['URL']:
+                    if target['notify']:
+                        body = 'Hi, Admin\n %s requested to access %s that is a restricted URL!' % \
+                               ('(Test User)', host_name)
+                        self.send_email('Restricted URL', body)
+                    return True
+        return False
+
+    def send_email(self, subject, body):
+        clientSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        clientSocket.connect(self.mail_server)
+        response = clientSocket.recv(1024)
+        self.log('(Email) Message after connection request: %s' % response)
+        if response[:3] != '220':
+            self.log('(Email) 220 reply not received from server.')
+        clientSocket.send('EHLO ut.ac.ir\r\n')
+        response = clientSocket.recv(1024)
+        self.log('(Email) Message after EHLO command: %s' % response)
+        if response[:3] != '250':
+            self.log('(Email) 250 reply not received from server.')
+
+        clientSocket.send('AUTH PLAIN %s\r\n' % self.auth_base64)
+        response = clientSocket.recv(1024)
+        self.log('(Email) Message after AUTH PLAIN command: %s' % response)
+
+        clientSocket.send('MAIL FROM: <%s>\r\n' % self.from_email)
+        response = clientSocket.recv(1024)
+        self.log('(Email) Message after MAIL FROM command: %s' % response)
+        clientSocket.send('RCPT TO: <%s>\r\n' % self.to_email)
+        response = clientSocket.recv(1024)
+        self.log('(Email) Message after RCPT TO command: %s' % response)
+
+        clientSocket.send('DATA\r\n')
+        response = clientSocket.recv(1024)
+        self.log('(Email) Message after DATA command: %s' % response)
+        clientSocket.send('Subject: %s\r\n\r\n' % subject)
+        date = time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime())
+        date = date + "\r\n\r\n"
+        clientSocket.send(date)
+        clientSocket.send(body)
+        clientSocket.send('\r\n.\r\n')
+        response = clientSocket.recv(1024)
+        self.log('(Email) Message after sending message body: %s' % response)
+
+        clientSocket.send('QUIT\r\n')
+        response = clientSocket.recv(1024)
+        self.log('(Email) Message after QUIT command: %s' % response)
+        clientSocket.close()
 
     def log(self, message, date=True):
         if self.logging['enable']:
