@@ -1,5 +1,6 @@
 import socket
 import time
+import datetime
 from threading import Thread
 import json
 
@@ -13,17 +14,42 @@ class Cache():
         self.cache_enable = cache_enable
         self.cache_size = cache_size
         self.cache_dict = {}
-    # def is_expired(self, path, host_name, host_port):
 
-    # def data_status(self, path, host_name, host_port):
-    #     if not self.cache_dict.has_key(host_name+path+":"+str(host_port)):
-    #         return UNAVAILABLE
-    #     else:
-    #         if
+    def is_expired(self, path, host_name, host_port): #to do
+        expire_date = self.cache_dict.has_key(host_name + path + ":" + str(host_port))['expires']
+        tmp = datetime.datetime.utcnow()
+        cur_date = tmp.strftime("%a, %d %b %Y %H:%M:%S GMT")
+        return True
+
+    def data_status(self, path, host_name, host_port):
+        if not self.cache_dict.has_key(host_name+path+":"+str(host_port)):
+            return UNAVAILABLE
+        else:
+            if self.is_expired(self, path, host_name, host_port):
+                return EXPIRED
+            else:
+                return FRESH
+        return FRESH
+
+    def get_response(self, path, host_name, host_port):
+        return self.cache_dict[host_name+path+":"+str(host_port)]['data']
+
+    def set_data(self, server_response, path, host_name, host_port, expire_date): #expires?? #LRU algorithm #capacity
+        self.cache_dict[host_name + path + ":" + str(host_port)]['data'] = server_response
+        self.cache_dict[host_name + path + ":" + str(host_port)]['expires'] = expire_date
 
 
 
 
+def add_if_modified_since(server_packet):
+
+    line2_pos = server_packet.find('Host')
+    end_line_pos = server_packet.find("\r\n", line2_pos) + 2
+    part1 = server_packet[:end_line_pos]
+    part2 = 'If_Modified_Since: wed,21 Oct 2015 07:28:00 GMT'
+    part3 = server_packet[end_line_pos + 1:]
+
+    return part1 + part2 + part3
 
 class CustomProxy():
 
@@ -132,15 +158,13 @@ class CustomProxy():
         else:
             print(message)
 
-    def check_request_header(self, data):
-
-        data_is_stale = True
+    def check_request_header(self, request):
         if_modified_since = False
         no_cache = False
         no_store = False
-        # check_modified = False
+        check_modified = False
 
-        request_header = data.split('\n')
+        request_header = request.split('\n')
         for element in request_header:
 
             if element == '':  # check in headers
@@ -148,7 +172,7 @@ class CustomProxy():
 
             if 'If-Modified-Since' in element:
                 if_modified_since = True
-                # check_modified = True
+                check_modified = True
 
             if 'Cache-Control' in element:
                 tmp = element.split(':')[1]
@@ -160,7 +184,72 @@ class CustomProxy():
                     if 'no-store' in param:
                         no_store = True
 
-        return if_modified_since, no_cache, no_store
+        return check_modified, if_modified_since, no_cache, no_store
+
+    def check_response_header(self, response):
+
+        response_header = response.split('\n')
+        age = 31536000
+        for element in response_header:
+            if element == '':  # check in headers
+                break
+            if 'Cache-Control' in element:
+                tmp = element.split(':')[1]
+                params = tmp.split(',')
+                for param in params:
+                    if 'private' in param:
+                        no_store = False
+                    if 'public' in param:
+                        no_store = True
+                    if 'max-age' in param:
+                        age = param.split('=')[1]
+                    if 's-maxage' in param:
+                        age = param.split('=')[1]
+        return age, no_store
+
+    def check_status(self, server_response):
+        first_line = server_response.split('\n')[0]
+        status = first_line.split(' ')[1]
+        if status == '200':
+            return True
+        if status == '304':
+            return False
+
+    def handle_server_response(self, check_modified, if_modified_since, request, path, host_name, host_port):
+
+        if_modified = False
+        if not check_modified : # first time we request server for the url
+
+            server_response = self.send_request(request, host_name, host_port)
+            age, no_store = self.check_response_header(server_response)
+            if_modified = True
+            self.log(' Get response from server for the first time\n')
+
+        if check_modified == True:
+
+            if if_modified_since == False:
+                request = add_if_modified_since(request)
+                self.log('Add "if modified since" to request \n')
+
+            server_response = self.send_request(request, host_name, host_port) #send request to server
+            age, no_store = self.check_response_header(server_response)
+            if_modified = self.check_status(server_response)
+
+        if self.caching == True:
+
+            if if_modified: # update cache & send new to client
+                self.log(' Data is modified update the cache\n')
+                output = server_response
+                self.cache.set_data(self.url , server_response , ex= age)
+
+            else :# use cache
+                self.log(' Data is not modified get from redis \n')
+                output = self.cache.get_response(path, host_name, host_port)
+
+
+        elif self.caching == False:
+                output = server_response
+        return output
 
     def handle_caching(self, request, path, host_name, host_port):
 
@@ -168,35 +257,30 @@ class CustomProxy():
 
         if self.caching['enable'] == True:
 
-            if_modified_since, no_cache, no_store = self.check_request_header(request)
+            check_modified, if_modified_since, no_cache, no_store = self.check_request_header(request)
 
+            data_status = self.cache.data_status(path, host_name, host_port)
 
+            if data_status == UNAVAILABLE:
+                check_modified = False
+                no_cache = True
 
-            # data_status = redis_obj.ttl(self.url)
-            #
-            # if data_status == -2:  # the source not available in cache
-            #     check_modified = False
-            #     data_is_stale = True
-            #
-            # elif data_status == -1:  # the source is expired
-            #     check_modified = True
-            #     data_is_stale = True
-            #
-            # elif data_status >= 0:  # the source is fresh
-            #     data_is_stale = False
-            #
-            # # get data from server or use cache
-            # if data_is_stale == False:
-            #     log('get from redis\n')
-            #     print 'get from redis '
-            #     cache_response = redis_obj.get(self.url)
-            #
-            # if data_is_stale == True:
-            #     cache_response = self.handle_server_response(check_modified, has_if_modified_since, request, webserver,
-            #                                                  port)
+            elif data_status == EXPIRED:
+                check_modified = True
+                no_cache = True
 
-        # else:
-        #     cache_response = self.send_to_server(request, webserver, port)
+            elif data_status == FRESH:
+                no_cache = False
+
+            if no_cache == False:
+                self.log('Get response from cache\n')
+                cache_response = self.cache.get_response(path, host_name, host_port)
+
+            if no_cache == True:
+                cache_response = self.handle_server_response(check_modified, if_modified_since, request, path, host_name, host_port)
+
+        else:
+            cache_response = self.send_request(request, host_name, host_port)
         return cache_response
 
 
