@@ -51,10 +51,15 @@ class CustomProxy():
         self.log("-----------------------------------\n%s\n-----------------------------------" % request, False)
         method, path, host_name, host_port = self.parse_request(request)
         if self.is_restricted(host_name):
+            self.log('%s is restricted' % host_name)
             client_socket.close()
             return
         request = self.update_request(request, method, path)
         response = self.send_request(request, host_name, host_port)
+        if not self.is_volume_available(client_address[0], len(response)):
+            self.log('%s does not have volume' % client_address[0])
+            client_socket.close()
+            return
         response = self.inject_response(response)
         client_socket.sendall(response)
         self.log("Response sent to %s[%s]" % client_address)
@@ -66,7 +71,7 @@ class CustomProxy():
         host = ''
         for line in splitted_request:
             if line.find('Host') != -1:
-                host = line.split(' ')[1]
+                host = line.split(':')[1].strip()
                 break
         path = requested_address[requested_address.find(host) + len(host):]
         splitted_host = host.split(":")
@@ -194,6 +199,19 @@ class CustomProxy():
         self.log(
             "$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$",
             False)
+
+    def is_volume_available(self, client_ip, content_length):
+        result = False
+        for user in self.accounting['users']:
+            if client_ip == user['IP']:
+                temp_volume = int(user['volume']) - content_length
+                if temp_volume < 0:
+                    user['volume'] = '-1'
+                else:
+                    user['volume'] = str(temp_volume)
+                    result = True
+                self.log('%s have %s bytes' % (client_ip, user['volume']))
+        return result
 
 
 myProxy = CustomProxy()
