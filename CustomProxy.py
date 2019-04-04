@@ -25,23 +25,23 @@ class Cache():
         except KeyError:
             return -1
 
-    def set_reponse(self, path, host_name, host_port, server_reponse, expire_date):
+    def set_response(self, path, host_name, host_port, server_response, expire_date):
         key = host_name+path+":"+str(host_port)
         if len(self.cache_dict) >= self.capacity:
             # find the LRU entry
             old_key = min(self.lru.keys(), key=lambda k:self.lru[k])
             self.cache_dict.pop(old_key)
             self.lru.pop(old_key)
-        self.cache_dict[key]['data'] = server_reponse
+        self.cache_dict[key]['data'] = server_response
         self.cache_dict[key]['expires'] = expire_date
         self.lru[key] = self.tm
         self.tm += 1
 
 
 
-    def is_expired(self, path, host_name, host_port): #to do
-        # expire_date = self.cache_dict.has_key(host_name + path + ":" + str(host_port))['expires']
-        # tmp = datetime.datetime.utcnow()
+    def is_expired(self, path, host_name, host_port): #to do by age or GMT date?!!!!!!
+        expire_date = self.cache_dict.has_key(host_name + path + ":" + str(host_port))['expires']
+        #tmp = datetime.datetime.utcnow()
         # cur_date = tmp.strftime("%a, %d %b %Y %H:%M:%S GMT")
         return True
 
@@ -58,7 +58,7 @@ class Cache():
 
 
 
-def add_if_modified_since(server_packet):
+def add_if_modified_since(server_packet): #tarikhesh alakie ?????
 
     line2_pos = server_packet.find('Host')
     end_line_pos = server_packet.find("\r\n", line2_pos) + 2
@@ -186,71 +186,70 @@ class CustomProxy():
             if 'If-Modified-Since' in element:
                 if_modified_since = True
 
+        return if_modified_since;
 
-        return if_modified_since
+    def check_response_header(self, response): #how to handle expire date and no cache to be considered later !!!!!!
+        response_header = response.split('\n')
+        no_cache = False
+        no_store = False
+        age = 31536000
+        for element in response_header:
+            if element == '':  # check in headers
+                break
+            if 'Cache-Control' in element:
+                tmp = element.split(':')[1]
+                params = tmp.split(',')
+                for param in params:
+                    if 'no_cache' in param:
+                        no_cache = True
+                    if 'private' in param:
+                        no_store = False
+                    if 'public' in param:
+                        no_store = True
+                    if 'max-age' in param:
+                        age = param.split('=')[1]
+                    if 's-maxage' in param:
+                        age = param.split('=')[1]
+        return age, no_store, no_cache
 
-    # def check_response_header(self, response):
-    #
-    #     response_header = response.split('\n')
-    #     age = 31536000
-    #     for element in response_header:
-    #         if element == '':  # check in headers
-    #             break
-    #         if 'Cache-Control' in element:
-    #             tmp = element.split(':')[1]
-    #             params = tmp.split(',')
-    #             for param in params:
-    #                 if 'private' in param:
-    #                     no_store = False
-    #                 if 'public' in param:
-    #                     no_store = True
-    #                 if 'max-age' in param:
-    #                     age = param.split('=')[1]
-    #                 if 's-maxage' in param:
-    #                     age = param.split('=')[1]
-    #     return age, no_store
-    #
-    # def check_status(self, server_response):
-    #     first_line = server_response.split('\n')[0]
-    #     status = first_line.split(' ')[1]
-    #     if status == '200':
-    #         return True
-    #     if status == '304':
-    #         return False
+    def check_status(self, server_response):
+        first_line = server_response.split('\n')[0]
+        status = first_line.split(' ')[1]
+        if status == '200':
+            return True
+        if status == '304':
+            return False
 
     def handle_server_response(self, not_in_cache, is_expired, if_modified_since, request, path, host_name, host_port):
-        output = ''
+        server_response = ''
         if_modified = False
-        # if not if_modified_since : # Request reponse again
-        #
-        #     server_response = self.send_request(request, host_name, host_port)
-        #     age, no_store = self.check_response_header(server_response)
-        #     if_modified = True
-        #     self.log(' Get response from server completely\n')
-        #
-        # else: # Request with if_modified_since header
-        #
-        #     request = add_if_modified_since(request)
-        #     self.log('Add "if modified since" to request \n')
-        #
-        #     server_response = self.send_request(request, host_name, host_port) #send request to server
-        #     age, no_store = self.check_response_header(server_response)
-        #     if_modified = self.check_status(server_response)
+        if not if_modified_since : # Request reponse again
+            server_response = self.send_request(request, host_name, host_port)
+            age, no_store , no_cache = self.check_response_header(server_response)
+            if_modified = True
+            self.log(' Get response from server with no modification check\n')
 
-        # if self.caching == True:
-        #
-        #     if if_modified: # update cache & send new to client
-        #         self.log(' Data is modified update the cache\n')
-        #         output = server_response
-        #         self.cache.set_data(self.url , server_response , ex = age)
-        #
-        #     else :# use cache
-        #         self.log(' Data is not modified get from redis \n')
-        #         output = self.cache.get_response(path, host_name, host_port)
-        #
-        #
-        # elif self.caching == False:
-        #         output = server_response
+        else: # Request with if_modified_since header
+            request = add_if_modified_since(request)
+            self.log('Add "if modified since" to the request to server\n')
+
+            server_response = self.send_request(request, host_name, host_port) #send updated request to server
+            age, no_store, no_cache = self.check_response_header(server_response)
+            if_modified = self.check_status(server_response)
+
+        if self.caching['enable'] == True:
+
+            if if_modified: # update cache & send new to client
+                self.log(' Data is modified, update the cache\n')
+                output = server_response
+                self.cache.set_response(path, host_name, host_port, server_response, expire_date = age) #alaan expire ro GMT bezaram ya age????
+
+            else :# use cache
+                self.log(' Data is not modified get from cache \n')
+                output = self.cache.get_response(path, host_name, host_port)
+
+        else:
+                output = server_response
         return output
 
     def handle_caching(self, request, path, host_name, host_port):
