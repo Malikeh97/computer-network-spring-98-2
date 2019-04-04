@@ -7,7 +7,7 @@ import json
 class CustomProxy():
 
     def __init__(self, ip="127.0.0.1", backlog=20, config_file='config.json'):
-        self.BUFFER_SIZE = 2 * 1024
+        self.BUFFER_SIZE = 8 * 1024
         self.ip = ip
         self.log_file = None
         self.mail_server = ('mail.ut.ac.ir', 25)
@@ -55,6 +55,7 @@ class CustomProxy():
             return
         request = self.update_request(request, method, path)
         response = self.send_request(request, host_name, host_port)
+        response = self.inject_response(response)
         client_socket.sendall(response)
         self.log("Response sent to %s[%s]" % client_address)
 
@@ -77,14 +78,14 @@ class CustomProxy():
     def update_request(self, request, method, path):
         splitted_request = request.split('\r\n')
 
-        splitted_request[0] = '%s %s HTTP/1.0' % (method, path)
+        splitted_request[0] = ('%s %s HTTP/1.0' % (method, path)).encode(encoding='UTF-8')
         new_request = ''
         for line in splitted_request:
             if line.find('Proxy-Connection') != -1:
                 continue
             if self.privacy['enable'] and line.find('User-Agent') != -1:
-                line = 'User-Agent: %s' % self.privacy['userAgent']
-            new_request += line + "\r\n"
+                line = ('User-Agent: %s' % self.privacy['userAgent']).encode(encoding='UTF-8')
+            new_request += line + '\r\n'.encode(encoding='UTF-8')
 
         return new_request
 
@@ -162,6 +163,19 @@ class CustomProxy():
         response = clientSocket.recv(1024)
         self.log('(Email) Message after QUIT command: %s' % response)
         clientSocket.close()
+
+    def inject_response(self, response):
+        if self.HTTPInjection['enable']:
+            body_start_pos = response.find('<body')
+            body_end_pos = response.find('>', body_start_pos)
+            print(body_start_pos)
+            if body_start_pos != -1:
+                return response[:body_end_pos + 1] + \
+                       ('\n<nav style="background-color: green; color: white; font-size: 20px;">' +
+                        self.HTTPInjection['post']['body'] +
+                        '</nav>\n').encode(encoding='UTF-8') + \
+                       response[body_end_pos + 2:]
+        return response
 
     def log(self, message, date=True):
         if self.logging['enable']:

@@ -12,9 +12,6 @@
     "enable": true,
     "userAgent": "CN Proxy Server (v1.0.0)"
   },
-  "alert": {
-    "enable": true
-  },
   "restriction": {
     "enable": true,
     "targets": [
