@@ -5,6 +5,7 @@ from threading import Thread
 import json
 import collections
 
+
 UNAVAILABLE = 0
 EXPIRED = 1
 FRESH = 2
@@ -14,42 +15,46 @@ class Cache():
     def __init__(self, cache_enable, cache_size):
         self.cache_enable = cache_enable
         self.cache_size = cache_size
-        self.cache_dict = collections.OrderedDict()
+        self.data_dict = collections.OrderedDict()
+        self.expire_dict = collections.OrderedDict()
+        self.tm = 0
+        self.lru = {}
 
     def get_response(self, path, host_name, host_port):
-        key = host_name+path+":"+str(host_port)
+        key = host_name+path
         try:
-            value = self.cache_dict.pop(key)
-            self.cache_dict[key] = value
-            return value['data']
+            value = self.data_dict.pop(key)
+            self.data_dict[key] = value
+            return value
         except KeyError:
             return -1
 
     def set_response(self, path, host_name, host_port, server_response, expire_date):
-        key = host_name+path+":"+str(host_port)
-        if len(self.cache_dict) >= self.capacity:
+        key = host_name+path
+        if len(self.data_dict) >= self.data_dict:
             # find the LRU entry
             old_key = min(self.lru.keys(), key=lambda k:self.lru[k])
-            self.cache_dict.pop(old_key)
+            self.data_dict.pop(old_key)
+            self.expire_dict.pop(old_key)
             self.lru.pop(old_key)
-        self.cache_dict[key]['data'] = server_response
-        self.cache_dict[key]['expires'] = expire_date
+        self.data_dict[key] = server_response
+        self.expire_dict[key] = expire_date
         self.lru[key] = self.tm
         self.tm += 1
 
 
 
     def is_expired(self, path, host_name, host_port): #to do by age or GMT date?!!!!!!
-        expire_date = self.cache_dict.has_key(host_name + path + ":" + str(host_port))['expires']
+        expire_date = self.expire_dict.has_key(host_name + path)
         #tmp = datetime.datetime.utcnow()
         # cur_date = tmp.strftime("%a, %d %b %Y %H:%M:%S GMT")
-        return True
+        return False
 
     def data_status(self, path, host_name, host_port):
-        if not self.cache_dict.has_key(host_name+path+":"+str(host_port)):
+        if not self.data_dict.has_key(host_name+path):
             return UNAVAILABLE
         else:
-            if self.is_expired(self, path, host_name, host_port):
+            if self.is_expired(path, host_name, host_port):
                 return EXPIRED
             else:
                 return FRESH
@@ -113,8 +118,8 @@ class CustomProxy():
         self.log("-----------------------------------\n%s\n-----------------------------------" % request, False)
         method, path, host_name, host_port = self.parse_request(request)
         request = self.update_request(request, method, path)
-        client_packet = self.handle_caching(request, path, host_name, host_port)
-        response = self.send_request(request, host_name, host_port) #tobe combined
+        response = self.handle_caching(request, path, host_name, host_port)
+        #response = self.send_request(request, host_name, host_port) #tobe combined
         client_socket.sendall(response)
         self.log("Response sent to %s[%s]" % client_address)
 
@@ -125,6 +130,8 @@ class CustomProxy():
         host = ''
         for line in splitted_request:
             if line.find('Host') != -1:
+                if line == '':
+                    break
                 host = line.split(' ')[1]
                 break
         path = requested_address[requested_address.find(host) + len(host):]
@@ -223,13 +230,16 @@ class CustomProxy():
     def handle_server_response(self, not_in_cache, is_expired, if_modified_since, request, path, host_name, host_port):
         server_response = ''
         if_modified = False
+        self.log("Test: handle_server response") #test
         if not if_modified_since : # Request reponse again
+            self.log("Test: not modified")  # test
             server_response = self.send_request(request, host_name, host_port)
             age, no_store , no_cache = self.check_response_header(server_response)
             if_modified = True
             self.log(' Get response from server with no modification check\n')
 
         else: # Request with if_modified_since header
+            self.log("Test: if modified")  # test
             request = add_if_modified_since(request)
             self.log('Add "if modified since" to the request to server\n')
 
@@ -253,15 +263,18 @@ class CustomProxy():
         return output
 
     def handle_caching(self, request, path, host_name, host_port):
-        cache_response = ''
+        if_modified = False
         is_expired = False
         not_in_cache = True
 
+
         if self.caching['enable'] == True:
 
-            if_modified_since = self.check_request_header(request)
+            if_modified = self.check_request_header(request)
 
             data_status = self.cache.data_status(path, host_name, host_port)
+
+            self.log("data_status: "+ str(data_status))
 
             if data_status == UNAVAILABLE:
                 not_in_cache = True
@@ -273,12 +286,12 @@ class CustomProxy():
             elif data_status == FRESH:
                 not_in_cache = False
 
-            if not_in_cache == False and if_modified_since == False:
+            if not_in_cache == False and if_modified == False:
                 self.log('Get response from cache\n')
                 cache_response = self.cache.get_response(path, host_name, host_port)
 
             else :
-                cache_response = self.handle_server_response(not_in_cache, is_expired, if_modified_since, request, path, host_name, host_port)
+                cache_response = self.handle_server_response(not_in_cache, is_expired, if_modified, request, path, host_name, host_port)
 
         else:
             cache_response = self.send_request(request, host_name, host_port)
