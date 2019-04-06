@@ -1,9 +1,9 @@
 import socket
 import time
-import datetime
 from threading import Thread
 import json
 import collections
+import datetime
 
 
 UNAVAILABLE = 0
@@ -45,8 +45,19 @@ class Cache():
 
 
     def is_expired(self, path, host_name, host_port): #to do by age or GMT date?!!!!!!
-        #tmp = datetime.datetime.utcnow()
-        # cur_date = tmp.strftime("%a, %d %b %Y %H:%M:%S GMT")
+        key = host_name + path
+        if not self.expire_dict.has_key(host_name + path):
+            return False
+        else:
+            if self.expire_dict[key] == '':
+                return False
+            else:
+                tmp = datetime.datetime.utcnow()
+                cur_date1 = tmp.strftime("%a, %d %b %Y %H:%M:%S GMT")
+                expire_date1 = self.expire_dict[key]
+                cur_date = datetime.datetime.strptime(cur_date1, '%a, %d %b %Y %H:%M:%S GMT')
+                expire_date = datetime.datetime.strptime(expire_date1[1:], '%a, %d %b %Y %H:%M:%S GMT')
+                return expire_date < cur_date
         return False
 
     def data_status(self, path, host_name, host_port):
@@ -62,12 +73,12 @@ class Cache():
 
 
 
-def add_if_modified_since(server_packet, modify_date): #tarikhesh alakie ?????
+def add_if_modified_since(server_packet, modify_date):
 
     line2_pos = server_packet.find('Host')
     end_line_pos = server_packet.find("\r\n", line2_pos) + 2
     part1 = server_packet[:end_line_pos]
-    part2 = modify_date
+    part2 = 'If_Modified_Since:'+ modify_date
     part3 = server_packet[end_line_pos + 1:]
 
     return part1 + part2 + part3
@@ -198,8 +209,7 @@ class CustomProxy():
     def check_response_header(self, response): #how to handle expire date and no cache to be considered later !!!!!!
         response_header = response.split('\n')
         no_cache = False
-        no_store = False
-        age = 31536000
+        expire_date = ''
         for element in response_header:
             if element == '':  # check in headers
                 break
@@ -209,15 +219,11 @@ class CustomProxy():
                 for param in params:
                     if 'no_cache' in param:
                         no_cache = True
-                    if 'private' in param:
-                        no_store = False
-                    if 'public' in param:
-                        no_store = True
-                    if 'max-age' in param:
-                        age = param.split('=')[1]
-                    if 's-maxage' in param:
-                        age = param.split('=')[1]
-        return age, no_store, no_cache
+            if 'Expires' in element:
+                expire_date = element.split(':')[1]
+
+        return expire_date, no_cache
+
 
     def check_status(self, server_response):
         first_line = server_response.split('\n')[0]
@@ -230,29 +236,26 @@ class CustomProxy():
     def handle_server_response(self, not_in_cache, is_expired, if_modified_since, modify_date, request, path, host_name, host_port):
         server_response = ''
         if_modified = False
-        self.log("Test: handle_server response") #test
         if not if_modified_since : # Request reponse again
-            self.log("Test: not modified")  # test
             server_response = self.send_request(request, host_name, host_port)
-            age, no_store , no_cache = self.check_response_header(server_response)
+            expire_date, no_cache = self.check_response_header(server_response)
             if_modified = True
             self.log(' Get response from server with no modification check\n')
 
         else: # Request with if_modified_since header
-            self.log("Test: if modified")  # test
             request = add_if_modified_since(request, modify_date)
             self.log('Add "if modified since" to the request to server\n')
 
             server_response = self.send_request(request, host_name, host_port) #send updated request to server
-            age, no_store, no_cache = self.check_response_header(server_response)
+            expire_date, no_cache = self.check_response_header(server_response)
             if_modified = self.check_status(server_response)
 
-        if self.caching['enable'] == True:
+        if self.caching['enable'] == True or no_cache == False:
 
             if if_modified: # update cache & send new to client
                 self.log(' Data is modified, update the cache\n')
                 output = server_response
-                self.cache.set_response(path, host_name, host_port, server_response, expire_date = age) #alaan expire ro GMT bezaram ya age????
+                self.cache.set_response(path, host_name, host_port, server_response, expire_date)
 
             else :# use cache
                 self.log(' Data is not modified get from cache \n')
