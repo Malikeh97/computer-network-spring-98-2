@@ -45,7 +45,6 @@ class Cache():
 
 
     def is_expired(self, path, host_name, host_port): #to do by age or GMT date?!!!!!!
-        expire_date = self.expire_dict.has_key(host_name + path)
         #tmp = datetime.datetime.utcnow()
         # cur_date = tmp.strftime("%a, %d %b %Y %H:%M:%S GMT")
         return False
@@ -63,12 +62,12 @@ class Cache():
 
 
 
-def add_if_modified_since(server_packet): #tarikhesh alakie ?????
+def add_if_modified_since(server_packet, modify_date): #tarikhesh alakie ?????
 
     line2_pos = server_packet.find('Host')
     end_line_pos = server_packet.find("\r\n", line2_pos) + 2
     part1 = server_packet[:end_line_pos]
-    part2 = 'If_Modified_Since: wed,21 Oct 2015 07:28:00 GMT'
+    part2 = modify_date
     part3 = server_packet[end_line_pos + 1:]
 
     return part1 + part2 + part3
@@ -192,8 +191,9 @@ class CustomProxy():
 
             if 'If-Modified-Since' in element:
                 if_modified_since = True
+                modify_date = element.split(':')[1]
 
-        return if_modified_since;
+        return if_modified_since, modify_date;
 
     def check_response_header(self, response): #how to handle expire date and no cache to be considered later !!!!!!
         response_header = response.split('\n')
@@ -227,7 +227,7 @@ class CustomProxy():
         if status == '304':
             return False
 
-    def handle_server_response(self, not_in_cache, is_expired, if_modified_since, request, path, host_name, host_port):
+    def handle_server_response(self, not_in_cache, is_expired, if_modified_since, modify_date, request, path, host_name, host_port):
         server_response = ''
         if_modified = False
         self.log("Test: handle_server response") #test
@@ -240,7 +240,7 @@ class CustomProxy():
 
         else: # Request with if_modified_since header
             self.log("Test: if modified")  # test
-            request = add_if_modified_since(request)
+            request = add_if_modified_since(request, modify_date)
             self.log('Add "if modified since" to the request to server\n')
 
             server_response = self.send_request(request, host_name, host_port) #send updated request to server
@@ -270,7 +270,7 @@ class CustomProxy():
 
         if self.caching['enable'] == True:
 
-            if_modified = self.check_request_header(request)
+            if_modified, modify_date = self.check_request_header(request)
 
             data_status = self.cache.data_status(path, host_name, host_port)
 
@@ -291,7 +291,7 @@ class CustomProxy():
                 cache_response = self.cache.get_response(path, host_name, host_port)
 
             else :
-                cache_response = self.handle_server_response(not_in_cache, is_expired, if_modified, request, path, host_name, host_port)
+                cache_response = self.handle_server_response(not_in_cache, is_expired, if_modified, modify_date, request, path, host_name, host_port)
 
         else:
             cache_response = self.send_request(request, host_name, host_port)
