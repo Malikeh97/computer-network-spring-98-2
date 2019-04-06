@@ -98,7 +98,7 @@ class CustomProxy():
         self.log('Proxy launched')
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.log("Socket successfully created")
-        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.socket.bind((self.ip, self.port))
         self.log("Socket bounded to %s" % self.port)
         self.socket.listen(backlog)
@@ -194,6 +194,7 @@ class CustomProxy():
 
     def check_request_header(self, request): #checked!!
         if_modified_since = False
+        modify_date = ''
         request_header = request.split('\n')
         for element in request_header:
 
@@ -269,11 +270,12 @@ class CustomProxy():
         if_modified = False
         is_expired = False
         not_in_cache = True
+        modification_date = ''
 
 
         if self.caching['enable'] == True:
 
-            if_modified, modify_date = self.check_request_header(request)
+            if_modified, modification_date = self.check_request_header(request)
 
             data_status = self.cache.data_status(path, host_name, host_port)
 
@@ -294,7 +296,7 @@ class CustomProxy():
                 cache_response = self.cache.get_response(path, host_name, host_port)
 
             else :
-                cache_response = self.handle_server_response(not_in_cache, is_expired, if_modified, modify_date, request, path, host_name, host_port)
+                cache_response = self.handle_server_response(not_in_cache, is_expired, if_modified, modification_date, request, path, host_name, host_port)
 
         else:
             cache_response = self.send_request(request, host_name, host_port)
